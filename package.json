@@ -1,0 +1,61 @@
+{
+  "name": "@api-usage-dashboard/sdk-node",
+  "version": "0.1.0",
+  "description": "Node.js SDK for API Usage Dashboard — one-line API analytics",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc && node scripts/inject-endpoint.js",
+    "dev": "tsc --watch",
+    "test": "vitest run --exclude dist",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@hapi/hapi": "^21.4.0",
+    "@types/express": "^5.0.6",
+    "@types/koa": "^2.15.0",
+    "@types/koa__router": "^12.0.4",
+    "@types/node": "^22.10.0",
+    "@types/supertest": "^6.0.3",
+    "fastify": "^5.0.0",
+    "fastify-plugin": "^5.0.0",
+    "koa": "^3.1.1",
+    "rxjs": "^7.8.0",
+    "supertest": "^7.2.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.18"
+  },
+  "peerDependencies": {
+    "@hapi/hapi": ">=21.0.0",
+    "express": ">=4.0.0",
+    "fastify": ">=4.0.0",
+    "fastify-plugin": ">=4.0.0",
+    "koa": ">=2.0.0",
+    "rxjs": ">=7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "fastify-plugin": {
+      "optional": true
+    },
+    "koa": {
+      "optional": true
+    },
+    "@hapi/hapi": {
+      "optional": true
+    },
+    "rxjs": {
+      "optional": true
+    }
+  }
+}
