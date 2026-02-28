@@ -1,4 +1,4 @@
-export interface ApiDashOptions {
+export interface PeekApiOptions {
   apiKey: string;
   /** Override the ingestion endpoint. Defaults to the URL baked in at build time. */
   endpoint?: string;
@@ -14,7 +14,10 @@ export interface ApiDashOptions {
     key?: string | Buffer;
     rejectUnauthorized?: boolean;
   };
-  /** Path to persist undelivered events. Default: os.tmpdir() + '/apidash-events-<hash>.jsonl' */
+  /** Include sorted query string in tracked path (e.g. /users?role=admin).
+   *  NOTE: increases DB usage — each unique path+query creates a separate endpoint row. */
+  collectQueryString?: boolean;
+  /** Path to persist undelivered events. Default: os.tmpdir() + '/peekapi-events-<hash>.jsonl' */
   storagePath?: string;
   /** Max bytes for the fallback storage file. Default: 5MB (5_242_880) */
   maxStorageBytes?: number;

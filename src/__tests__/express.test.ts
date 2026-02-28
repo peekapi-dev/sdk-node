@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import https from "https";
 import { createHash } from "crypto";
 import { expressMiddleware } from "../middleware/express";
-import type { ApiDashOptions } from "../types";
+import type { PeekApiOptions } from "../types";
 
 // Prevent MaxListenersExceededWarning from test client instances
 process.setMaxListeners(50);
 
-const VALID_OPTIONS: ApiDashOptions = {
+const VALID_OPTIONS: PeekApiOptions = {
   apiKey: "ak_test_key_123",
   endpoint: "https://example.supabase.co/functions/v1/ingest",
   flushInterval: 60_000,
@@ -332,5 +332,48 @@ describe("crash safety — middleware must never break customer response", () =>
 
     mw(req, res, next);
     expect(next).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── collectQueryString ──────────────────────────────────────────────
+
+describe("collectQueryString option", () => {
+  it("does not include query string by default", () => {
+    const mw = expressMiddleware(VALID_OPTIONS);
+    const req = mockReq({
+      path: "/search",
+      originalUrl: "/search?q=foo&page=1",
+      route: undefined,
+    });
+    const res = mockRes();
+    mw(req, res, vi.fn());
+    // No throw — query string excluded by default
+    res.end();
+  });
+
+  it("appends sorted query string when collectQueryString is true", () => {
+    const mw = expressMiddleware({ ...VALID_OPTIONS, collectQueryString: true });
+    const req = mockReq({
+      path: "/search",
+      originalUrl: "/search?z=3&a=1&m=2",
+      route: undefined,
+    });
+    const res = mockRes();
+    mw(req, res, vi.fn());
+    res.end();
+    // Middleware doesn't throw — sorted QS appended internally
+  });
+
+  it("handles missing originalUrl gracefully", () => {
+    const mw = expressMiddleware({ ...VALID_OPTIONS, collectQueryString: true });
+    const req = mockReq({
+      path: "/users",
+      originalUrl: "/users",
+      route: undefined,
+    });
+    const res = mockRes();
+    mw(req, res, vi.fn());
+    res.end();
+    // No query string → path stays "/users"
   });
 });

@@ -8,22 +8,23 @@ import net from "net";
 import os from "os";
 import path from "path";
 import { URL } from "url";
-import type { ApiDashOptions, RequestEvent } from "./types";
+import type { PeekApiOptions, RequestEvent } from "./types";
+import { version as SDK_VERSION } from "../package.json";
 
-// Replaced at build time by APIDASH_DEFAULT_ENDPOINT env var
-const DEFAULT_ENDPOINT = "__APIDASH_DEFAULT_ENDPOINT__";
+const DEFAULT_ENDPOINT = "https://ingest.peekapi.dev/v1/events";
 
-const DEFAULT_FLUSH_INTERVAL = 10_000; // 10 seconds
-const DEFAULT_BATCH_SIZE = 100;
+const DEFAULT_FLUSH_INTERVAL = 15_000; // 15 seconds
+const DEFAULT_BATCH_SIZE = 250;
 const DEFAULT_MAX_BUFFER_SIZE = 10_000;
 const MAX_PATH_LENGTH = 2048;
 const MAX_METHOD_LENGTH = 16;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const BASE_BACKOFF_MS = 1_000;
 const DEFAULT_MAX_STORAGE_BYTES = 5_242_880; // 5MB
-const SEND_TIMEOUT_MS = 5_000; // total request timeout (DNS + TCP + TLS + response)
+const SEND_TIMEOUT_MS = 15_000; // total request timeout (DNS + TCP + TLS + response)
 const DNS_CACHE_TTL_MS = 60_000; // 60 seconds
 const DEFAULT_MAX_EVENT_BYTES = 65_536; // 64KB per event
+const DISK_RECOVERY_INTERVAL_MS = 60_000; // retry persisted events every 60s
 
 // Status codes worth retrying — everything else is a permanent failure
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
@@ -75,7 +76,7 @@ function isPrivateIP(ip: string): boolean {
 /** Exported for testing. */
 export { isPrivateIP as _isPrivateIP };
 
-export class ApiDashClient {
+export class PeekApiClient {
   private apiKey: string;
   private parsedUrl: URL;
   private flushInterval: number;
@@ -95,23 +96,17 @@ export class ApiDashClient {
   private maxEventBytes: number;
   private onError: ((err: Error) => void) | undefined;
   private recoveryPath: string | null = null; // set when loadFromDisk renames the file
+  private lastDiskRecovery = Date.now();
   private signalHandlers: { signal: string; handler: () => void }[] = [];
 
-  constructor(options: ApiDashOptions) {
+  constructor(options: PeekApiOptions) {
     const endpoint = options.endpoint ?? DEFAULT_ENDPOINT;
-
-    if (!endpoint || endpoint === "__APIDASH_DEFAULT_ENDPOINT__") {
-      throw new Error(
-        "[apidash] 'endpoint' is required. Either pass it in options or build the SDK " +
-          "with APIDASH_DEFAULT_ENDPOINT env var set.",
-      );
-    }
 
     let url: URL;
     try {
       url = new URL(endpoint);
     } catch {
-      throw new Error(`[apidash] Invalid endpoint URL: ${endpoint}`);
+      throw new Error(`[peekapi] Invalid endpoint URL: ${endpoint}`);
     }
 
     // Enforce HTTPS (allow http://localhost and http://127.0.0.1 for local dev)
@@ -120,13 +115,13 @@ export class ApiDashClient {
     const isLocalhost = bareHostname === "localhost" || bareHostname === "127.0.0.1";
     if (url.protocol !== "https:" && !isLocalhost) {
       throw new Error(
-        "[apidash] Endpoint must use HTTPS. Plain HTTP is only allowed for localhost.",
+        "[peekapi] Endpoint must use HTTPS. Plain HTTP is only allowed for localhost.",
       );
     }
 
     // SSRF protection: block private/loopback IPs (except localhost for dev)
     if (!isLocalhost && isPrivateIP(bareHostname)) {
-      throw new Error("[apidash] Endpoint must not point to a private or internal IP address.");
+      throw new Error("[peekapi] Endpoint must not point to a private or internal IP address.");
     }
 
     // Strip any embedded credentials
@@ -134,7 +129,7 @@ export class ApiDashClient {
       url.username = "";
       url.password = "";
       if (options.debug) {
-        console.warn("[apidash] Stripped embedded credentials from endpoint URL");
+        console.warn("[peekapi] Stripped embedded credentials from endpoint URL");
       }
     }
 
@@ -142,11 +137,11 @@ export class ApiDashClient {
 
     // Validate API key
     if (!options.apiKey || typeof options.apiKey !== "string") {
-      throw new Error("[apidash] 'apiKey' is required and must be a string.");
+      throw new Error("[peekapi] 'apiKey' is required and must be a string.");
     }
     // eslint-disable-next-line no-control-regex
     if (/[\r\n\0]/.test(options.apiKey)) {
-      throw new Error("[apidash] 'apiKey' contains invalid characters.");
+      throw new Error("[peekapi] 'apiKey' contains invalid characters.");
     }
     this.apiKey = options.apiKey;
 
@@ -176,7 +171,7 @@ export class ApiDashClient {
           if (err) return callback(err, address, family);
           if (typeof address === "string" && isPrivateIP(address)) {
             return callback(
-              new Error(`[apidash] DNS resolved to private IP ${address} (SSRF protection)`),
+              new Error(`[peekapi] DNS resolved to private IP ${address} (SSRF protection)`),
               address,
               family,
             );
@@ -202,7 +197,7 @@ export class ApiDashClient {
       options.storagePath ??
       path.join(
         os.tmpdir(),
-        `apidash-events-${createHash("md5").update(endpoint).digest("hex").slice(0, 8)}.jsonl`,
+        `peekapi-events-${createHash("md5").update(endpoint).digest("hex").slice(0, 8)}.jsonl`,
       );
 
     this.loadFromDisk();
@@ -227,14 +222,14 @@ export class ApiDashClient {
           delete event.metadata;
           if (this.debug) {
             console.warn(
-              `[apidash] Event exceeded ${this.maxEventBytes} bytes — metadata stripped`,
+              `[peekapi] Event exceeded ${this.maxEventBytes} bytes — metadata stripped`,
             );
           }
           const reduced = Buffer.byteLength(JSON.stringify(event));
           if (reduced > this.maxEventBytes) {
             if (this.debug) {
               console.warn(
-                `[apidash] Event still exceeds limit after stripping metadata (${reduced}B) — dropped`,
+                `[peekapi] Event still exceeds limit after stripping metadata (${reduced}B) — dropped`,
               );
             }
             return;
@@ -279,7 +274,7 @@ export class ApiDashClient {
       this.backoffUntil = 0;
       this.cleanupRecoveryFile();
       if (this.debug) {
-        console.log(`[apidash] Flushed ${events.length} events`);
+        console.log(`[peekapi] Flushed ${events.length} events`);
       }
     } catch (err) {
       if (this.onError) {
@@ -296,7 +291,7 @@ export class ApiDashClient {
         await this.persistToDiskAsync(events);
         if (this.debug) {
           console.error(
-            `[apidash] Non-retryable error, persisted to disk:`,
+            `[peekapi] Non-retryable error, persisted to disk:`,
             (err as Error).message,
           );
         }
@@ -315,7 +310,7 @@ export class ApiDashClient {
           }
           if (this.debug) {
             console.error(
-              `[apidash] Flush failed (attempt ${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
+              `[peekapi] Flush failed (attempt ${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
               (err as Error).message,
             );
           }
@@ -368,12 +363,20 @@ export class ApiDashClient {
   /** Swallow internal errors — an analytics SDK must never crash the host app. */
   private onInternalError = (err: unknown): void => {
     if (this.debug) {
-      console.error("[apidash] Internal error (suppressed):", (err as Error).message ?? err);
+      console.error("[peekapi] Internal error (suppressed):", (err as Error).message ?? err);
     }
   };
 
   private startTimer(): void {
-    this.timer = setInterval(() => this.flush().catch(this.onInternalError), this.flushInterval);
+    this.timer = setInterval(async () => {
+      await this.flush().catch(this.onInternalError);
+      // Periodically recover persisted events from disk
+      const now = Date.now();
+      if (now - this.lastDiskRecovery >= DISK_RECOVERY_INTERVAL_MS) {
+        this.lastDiskRecovery = now;
+        this.loadFromDisk();
+      }
+    }, this.flushInterval);
     // Allow the process to exit even if the timer is running
     if (this.timer.unref) {
       this.timer.unref();
@@ -398,21 +401,21 @@ export class ApiDashClient {
         if (stat.size >= this.maxStorageBytes) {
           if (this.debug) {
             console.warn(
-              `[apidash] Storage file full (${stat.size} bytes), skipping disk persist of ${events.length} events`,
+              `[peekapi] Storage file full (${stat.size} bytes), skipping disk persist of ${events.length} events`,
             );
           }
           return;
         }
         await fd.write(JSON.stringify(events) + "\n");
         if (this.debug) {
-          console.log(`[apidash] Persisted ${events.length} events to ${this.storagePath}`);
+          console.log(`[peekapi] Persisted ${events.length} events to ${this.storagePath}`);
         }
       } finally {
         await fd.close();
       }
     } catch (err) {
       if (this.debug) {
-        console.error("[apidash] Failed to persist events to disk:", (err as Error).message);
+        console.error("[peekapi] Failed to persist events to disk:", (err as Error).message);
       }
     }
   }
@@ -432,18 +435,18 @@ export class ApiDashClient {
       if (stat.size >= this.maxStorageBytes) {
         if (this.debug) {
           console.warn(
-            `[apidash] Storage file full (${stat.size} bytes), skipping disk persist of ${events.length} events`,
+            `[peekapi] Storage file full (${stat.size} bytes), skipping disk persist of ${events.length} events`,
           );
         }
         return;
       }
       fs.writeSync(fd, JSON.stringify(events) + "\n");
       if (this.debug) {
-        console.log(`[apidash] Persisted ${events.length} events to ${this.storagePath}`);
+        console.log(`[peekapi] Persisted ${events.length} events to ${this.storagePath}`);
       }
     } catch (err) {
       if (this.debug) {
-        console.error("[apidash] Failed to persist events to disk:", (err as Error).message);
+        console.error("[peekapi] Failed to persist events to disk:", (err as Error).message);
       }
     } finally {
       if (fd !== null) {
@@ -506,11 +509,11 @@ export class ApiDashClient {
       this.recoveryPath = recoverPath;
 
       if (this.debug && loaded > 0) {
-        console.log(`[apidash] Recovered ${loaded} events from disk`);
+        console.log(`[peekapi] Recovered ${loaded} events from disk`);
       }
     } catch (err) {
       if (this.debug) {
-        console.error("[apidash] Failed to load persisted events:", (err as Error).message);
+        console.error("[peekapi] Failed to load persisted events:", (err as Error).message);
       }
       // Try to clean up corrupt file
       try {
@@ -554,11 +557,6 @@ export class ApiDashClient {
     this.signalHandlers = [];
   }
 
-  /** Mask API key for safe logging: show first 8 chars only */
-  private get maskedKey(): string {
-    return this.apiKey.length > 8 ? this.apiKey.slice(0, 8) + "..." : this.apiKey;
-  }
-
   private send(events: RequestEvent[]): Promise<void> {
     return new Promise((resolve, reject) => {
       const payload = JSON.stringify(events);
@@ -581,6 +579,7 @@ export class ApiDashClient {
             "Content-Type": "application/json",
             "Content-Length": Buffer.byteLength(payload),
             "x-api-key": this.apiKey,
+            "x-peekapi-sdk": `node/${SDK_VERSION}`,
           },
           agent: this.agent,
           signal: ac.signal,

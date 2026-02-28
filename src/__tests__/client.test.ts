@@ -4,7 +4,7 @@ import https from "https";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { ApiDashClient, _isPrivateIP } from "../client";
+import { PeekApiClient, _isPrivateIP } from "../client";
 import type { RequestEvent } from "../types";
 
 // Helpers
@@ -25,7 +25,7 @@ function makeEvent(overrides: Partial<RequestEvent> = {}): RequestEvent {
 function tmpStoragePath(): string {
   return path.join(
     os.tmpdir(),
-    `apidash-test-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
+    `peekapi-test-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
   );
 }
 
@@ -89,14 +89,14 @@ afterEach(() => {
 // ─── Constructor Validation ───────────────────────────────────────────
 
 describe("constructor validation", () => {
-  it("throws when endpoint is missing", () => {
-    expect(() => new ApiDashClient({ apiKey: "ak_test", endpoint: "" })).toThrow(
-      "'endpoint' is required",
-    );
+  it("uses default endpoint when not provided", () => {
+    const client = new PeekApiClient({ apiKey: "ak_test" });
+    expect((client as any).parsedUrl.hostname).toContain("supabase.co");
+    client.shutdown();
   });
 
   it("throws on invalid URL", () => {
-    expect(() => new ApiDashClient({ apiKey: "ak_test", endpoint: "not-a-url" })).toThrow(
+    expect(() => new PeekApiClient({ apiKey: "ak_test", endpoint: "not-a-url" })).toThrow(
       "Invalid endpoint URL",
     );
   });
@@ -104,7 +104,7 @@ describe("constructor validation", () => {
   it("throws on plain HTTP (non-localhost)", () => {
     expect(
       () =>
-        new ApiDashClient({
+        new PeekApiClient({
           apiKey: "ak_test",
           endpoint: "http://example.com/ingest",
         }),
@@ -112,7 +112,7 @@ describe("constructor validation", () => {
   });
 
   it("allows http://localhost for local dev", () => {
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       apiKey: "ak_test",
       endpoint: "http://localhost:3000/ingest",
       flushInterval: 60_000,
@@ -122,7 +122,7 @@ describe("constructor validation", () => {
   });
 
   it("allows http://127.0.0.1 for local dev", () => {
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       apiKey: "ak_test",
       endpoint: "http://127.0.0.1:3000/ingest",
       flushInterval: 60_000,
@@ -140,14 +140,14 @@ describe("constructor validation", () => {
     ];
     for (const endpoint of privateIPs) {
       expect(
-        () => new ApiDashClient({ apiKey: "ak_test", endpoint, flushInterval: 60_000 }),
+        () => new PeekApiClient({ apiKey: "ak_test", endpoint, flushInterval: 60_000 }),
       ).toThrow("private or internal IP");
     }
   });
 
   it("strips embedded credentials from endpoint URL", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       apiKey: "ak_test",
       endpoint: "https://user:pass@example.com/ingest",
       debug: true,
@@ -158,7 +158,7 @@ describe("constructor validation", () => {
   });
 
   it("throws when apiKey is missing", () => {
-    expect(() => new ApiDashClient({ apiKey: "", endpoint: "https://example.com/ingest" })).toThrow(
+    expect(() => new PeekApiClient({ apiKey: "", endpoint: "https://example.com/ingest" })).toThrow(
       "'apiKey' is required",
     );
   });
@@ -166,7 +166,7 @@ describe("constructor validation", () => {
   it("throws when apiKey contains CRLF", () => {
     expect(
       () =>
-        new ApiDashClient({
+        new PeekApiClient({
           apiKey: "ak_test\r\nInjected: header",
           endpoint: "https://example.com/ingest",
         }),
@@ -176,7 +176,7 @@ describe("constructor validation", () => {
   it("throws when apiKey contains null byte", () => {
     expect(
       () =>
-        new ApiDashClient({
+        new PeekApiClient({
           apiKey: "ak_test\0",
           endpoint: "https://example.com/ingest",
         }),
@@ -188,7 +188,7 @@ describe("constructor validation", () => {
 
 describe("buffer management", () => {
   it("buffers events via track()", () => {
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 10,
       storagePath: tmpStoragePath(),
@@ -201,7 +201,7 @@ describe("buffer management", () => {
   });
 
   it("triggers flush when buffer is full (never drops events)", () => {
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       maxBufferSize: 3,
       batchSize: 3, // flush triggers at maxBufferSize
@@ -224,7 +224,7 @@ describe("buffer management", () => {
   });
 
   it("truncates long paths to 2048 chars", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     const longPath = "/api/" + "x".repeat(3000);
     client.track(makeEvent({ path: longPath }));
 
@@ -234,7 +234,7 @@ describe("buffer management", () => {
   });
 
   it("truncates long methods to 16 chars", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     client.track(makeEvent({ method: "SUPERLONGMETHOD!" }));
 
     const buffer = (client as any).buffer as RequestEvent[];
@@ -243,7 +243,7 @@ describe("buffer management", () => {
   });
 
   it("truncates consumer_id to 256 chars", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     const longId = "c".repeat(500);
     client.track(makeEvent({ consumer_id: longId }));
 
@@ -257,7 +257,7 @@ describe("buffer management", () => {
 
 describe("per-event size limit (maxEventBytes)", () => {
   it("strips metadata when event exceeds maxEventBytes", () => {
-    const client = new ApiDashClient({ ...VALID_OPTIONS, maxEventBytes: 256 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, maxEventBytes: 256 });
     const bigMeta = { payload: "x".repeat(1000) };
     client.track(makeEvent({ metadata: bigMeta }));
 
@@ -268,7 +268,7 @@ describe("per-event size limit (maxEventBytes)", () => {
   });
 
   it("keeps metadata when event is within maxEventBytes", () => {
-    const client = new ApiDashClient({ ...VALID_OPTIONS, maxEventBytes: 65_536 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, maxEventBytes: 65_536 });
     const smallMeta = { tag: "ok" };
     client.track(makeEvent({ metadata: smallMeta }));
 
@@ -280,7 +280,7 @@ describe("per-event size limit (maxEventBytes)", () => {
 
   it("drops event entirely if still too large after stripping metadata", () => {
     // Use a very low limit that even a bare event exceeds
-    const client = new ApiDashClient({ ...VALID_OPTIONS, maxEventBytes: 10 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, maxEventBytes: 10 });
     client.track(makeEvent({ metadata: { a: 1 } }));
 
     const buffer = (client as any).buffer as RequestEvent[];
@@ -289,7 +289,7 @@ describe("per-event size limit (maxEventBytes)", () => {
   });
 
   it("does not check size when metadata is absent", () => {
-    const client = new ApiDashClient({ ...VALID_OPTIONS, maxEventBytes: 10 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, maxEventBytes: 10 });
     // No metadata — size check is skipped, event is accepted even if technically large
     client.track(makeEvent());
 
@@ -303,7 +303,7 @@ describe("per-event size limit (maxEventBytes)", () => {
 
 describe("flush", () => {
   it("auto-flushes when buffer reaches batchSize", async () => {
-    const client = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 2 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 2 });
 
     client.track(makeEvent());
     client.track(makeEvent()); // triggers flush
@@ -318,7 +318,7 @@ describe("flush", () => {
   });
 
   it("sends correct payload to endpoint", async () => {
-    const client = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 1 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 1 });
     const event = makeEvent({ path: "/api/users" });
     client.track(event);
 
@@ -332,11 +332,12 @@ describe("flush", () => {
     expect(callArgs.method).toBe("POST");
     expect(callArgs.headers["x-api-key"]).toBe("ak_test_key_123");
     expect(callArgs.headers["Content-Type"]).toBe("application/json");
+    expect(callArgs.headers["x-peekapi-sdk"]).toMatch(/^node\/\d+\.\d+\.\d+$/);
     client.shutdown();
   });
 
   it("skips flush when buffer is empty", async () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     await client.flush();
     expect(requestStub).not.toHaveBeenCalled();
     client.shutdown();
@@ -353,7 +354,7 @@ describe("flush", () => {
       } as any;
     });
 
-    const client = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 1000 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 1000 });
     client.track(makeEvent());
     client.track(makeEvent());
 
@@ -377,7 +378,7 @@ describe("retry and backoff", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       maxBufferSize: 100,
@@ -400,7 +401,7 @@ describe("retry and backoff", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 1000 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 1000 });
     client.track(makeEvent());
     await client.flush();
 
@@ -421,7 +422,7 @@ describe("retry and backoff", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 1000 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 1000 });
     client.track(makeEvent());
 
     // First flush fails
@@ -472,7 +473,7 @@ describe("disk persistence", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath,
@@ -500,7 +501,7 @@ describe("disk persistence", () => {
     const events = [makeEvent({ path: "/recovered" })];
     fs.writeFileSync(storagePath, JSON.stringify(events) + "\n");
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath,
     });
@@ -519,7 +520,7 @@ describe("disk persistence", () => {
     const events = Array.from({ length: 50 }, (_, i) => makeEvent({ path: `/event-${i}` }));
     fs.writeFileSync(storagePath, JSON.stringify(events) + "\n");
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath,
       maxBufferSize: 10,
@@ -533,7 +534,7 @@ describe("disk persistence", () => {
     fs.writeFileSync(storagePath, "not json\n{also bad\n");
 
     // Should not throw
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath,
     });
@@ -551,7 +552,7 @@ describe("disk persistence", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath,
@@ -583,7 +584,7 @@ describe("disk persistence", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath,
@@ -606,7 +607,7 @@ describe("disk persistence", () => {
     const batch2 = [makeEvent({ path: "/batch2" })];
     fs.writeFileSync(storagePath, JSON.stringify(batch1) + "\n" + JSON.stringify(batch2) + "\n");
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath,
     });
@@ -622,7 +623,7 @@ describe("disk persistence", () => {
     const events = [makeEvent({ path: "/recover-then-flush" })];
     fs.writeFileSync(storagePath, JSON.stringify(events) + "\n");
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1,
       storagePath,
@@ -646,7 +647,7 @@ describe("disk persistence", () => {
     fs.writeFileSync(storagePath, JSON.stringify(events) + "\n");
 
     // First startup: loads events, renames to .recovering
-    const client1 = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 1000, storagePath });
+    const client1 = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 1000, storagePath });
     expect((client1 as any).buffer[0].path).toBe("/crash-recovery");
     // Simulate crash — no flush, just destroy
     client1.shutdown();
@@ -655,7 +656,7 @@ describe("disk persistence", () => {
     expect(fs.existsSync(storagePath + ".recovering")).toBe(true);
 
     // Second startup: should find .recovering and re-load
-    const client2 = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 1000, storagePath });
+    const client2 = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 1000, storagePath });
     const buffer = (client2 as any).buffer as RequestEvent[];
     expect(buffer.some((e: RequestEvent) => e.path === "/crash-recovery")).toBe(true);
     client2.shutdown();
@@ -668,7 +669,7 @@ describe("disk persistence", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath,
@@ -689,6 +690,25 @@ describe("disk persistence", () => {
     expect(JSON.parse(content)[0].path).toBe("/toctou");
     client.shutdown();
   });
+
+  it("recovers persisted events during same process (runtime recovery)", async () => {
+    const client = new PeekApiClient({
+      ...VALID_OPTIONS,
+      storagePath,
+      batchSize: 1000,
+    });
+
+    // Simulate events persisted to disk mid-process
+    const events = [makeEvent({ path: "/runtime-recover" })];
+    fs.writeFileSync(storagePath, JSON.stringify(events) + "\n");
+
+    // Trigger runtime recovery (same client, not a new one)
+    (client as any).loadFromDisk();
+
+    expect((client as any).buffer.length).toBe(1);
+    expect((client as any).buffer[0].path).toBe("/runtime-recover");
+    client.shutdown();
+  });
 });
 
 // ─── Error Classification ─────────────────────────────────────────────
@@ -702,7 +722,7 @@ describe("error classification", () => {
     });
 
     const storagePath = tmpStoragePath();
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath,
@@ -733,7 +753,7 @@ describe("error classification", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -753,7 +773,7 @@ describe("error classification", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -773,7 +793,7 @@ describe("error classification", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -796,7 +816,7 @@ describe("error classification", () => {
     const origError = console.error;
     console.error = (...args: any[]) => debugLogs.push(args.join(" "));
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -825,7 +845,7 @@ describe("error classification", () => {
     const origError = console.error;
     console.error = (...args: any[]) => debugLogs.push(args.join(" "));
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -853,7 +873,7 @@ describe("onError callback", () => {
     });
 
     const errors: Error[] = [];
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -873,7 +893,7 @@ describe("onError callback", () => {
     });
 
     const errors: Error[] = [];
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -891,7 +911,7 @@ describe("onError callback", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -918,7 +938,7 @@ describe("backoff jitter", () => {
 
     const delays: number[] = [];
     for (let i = 0; i < 10; i++) {
-      const client = new ApiDashClient({
+      const client = new PeekApiClient({
         ...VALID_OPTIONS,
         batchSize: 1000,
         storagePath: tmpStoragePath(),
@@ -950,7 +970,7 @@ describe("backoff jitter", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -968,7 +988,7 @@ describe("backoff jitter", () => {
 
 describe("flush batching", () => {
   it("flush only sends batchSize events, leaving remainder in buffer", async () => {
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 3,
       maxBufferSize: 100,
@@ -1010,7 +1030,7 @@ describe("flush batching", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 200,
       maxBufferSize: 500,
@@ -1036,7 +1056,7 @@ describe("flush batching", () => {
 
 describe("signal handler cleanup", () => {
   it("removes signal handlers on shutdown", async () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     const handlers = (client as any).signalHandlers;
     expect(handlers.length).toBe(2); // SIGTERM + SIGINT
 
@@ -1046,7 +1066,7 @@ describe("signal handler cleanup", () => {
 
   it("does not call process.exit on SIGTERM", () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath: tmpStoragePath(),
     });
@@ -1120,7 +1140,7 @@ describe("constructor SSRF", () => {
   it("blocks CGNAT range at construction time", () => {
     expect(
       () =>
-        new ApiDashClient({
+        new PeekApiClient({
           apiKey: "ak_test",
           endpoint: "https://100.64.0.1/ingest",
           flushInterval: 60_000,
@@ -1131,7 +1151,7 @@ describe("constructor SSRF", () => {
   it("blocks IPv4-mapped IPv6 at construction time", () => {
     expect(
       () =>
-        new ApiDashClient({
+        new PeekApiClient({
           apiKey: "ak_test",
           endpoint: "https://[::ffff:10.0.0.1]/ingest",
           flushInterval: 60_000,
@@ -1142,7 +1162,7 @@ describe("constructor SSRF", () => {
   it("blocks IPv6 loopback at construction time", () => {
     expect(
       () =>
-        new ApiDashClient({
+        new PeekApiClient({
           apiKey: "ak_test",
           endpoint: "https://[::1]/ingest",
           flushInterval: 60_000,
@@ -1153,7 +1173,7 @@ describe("constructor SSRF", () => {
   it("blocks IPv6 ULA at construction time", () => {
     expect(
       () =>
-        new ApiDashClient({
+        new PeekApiClient({
           apiKey: "ak_test",
           endpoint: "https://[fc00::1]/ingest",
           flushInterval: 60_000,
@@ -1166,7 +1186,7 @@ describe("constructor SSRF", () => {
 
 describe("shutdown", () => {
   it("clears the timer", async () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     expect((client as any).timer).not.toBeNull();
 
     await client.shutdown();
@@ -1174,7 +1194,7 @@ describe("shutdown", () => {
   });
 
   it("flushes remaining buffer", async () => {
-    const client = new ApiDashClient({ ...VALID_OPTIONS, batchSize: 1000 });
+    const client = new PeekApiClient({ ...VALID_OPTIONS, batchSize: 1000 });
     client.track(makeEvent());
     client.track(makeEvent());
 
@@ -1211,7 +1231,7 @@ describe("shutdown", () => {
       return mock as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1000,
       storagePath: tmpStoragePath(),
@@ -1253,7 +1273,7 @@ describe("shutdown", () => {
 
 describe("send timeout", () => {
   it("uses AbortController signal (not socket idle timeout)", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     client.track(makeEvent());
 
     // Verify the request options include `signal` (not `timeout`)
@@ -1272,7 +1292,7 @@ describe("send timeout", () => {
 
 describe("crash safety — track() must never throw", () => {
   it("survives undefined method/path", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     expect(() =>
       client.track(makeEvent({ method: undefined as any, path: undefined as any })),
     ).not.toThrow();
@@ -1280,19 +1300,19 @@ describe("crash safety — track() must never throw", () => {
   });
 
   it("survives null method/path", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     expect(() => client.track(makeEvent({ method: null as any, path: null as any }))).not.toThrow();
     client.shutdown();
   });
 
   it("survives numeric method/path", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     expect(() => client.track(makeEvent({ method: 123 as any, path: 456 as any }))).not.toThrow();
     client.shutdown();
   });
 
   it("coerces method/path to strings in the buffer", () => {
-    const client = new ApiDashClient(VALID_OPTIONS);
+    const client = new PeekApiClient(VALID_OPTIONS);
     client.track(makeEvent({ method: 123 as any, path: undefined as any }));
 
     // Verify the flush sends without error (coerced values are valid JSON)
@@ -1312,7 +1332,7 @@ describe("crash safety — track() must never throw", () => {
       return mock as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       batchSize: 1, // trigger flush on every track
       storagePath: sp,
@@ -1340,7 +1360,7 @@ describe("async disk I/O in flush path", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath: sp,
     });
@@ -1371,7 +1391,7 @@ describe("async disk I/O in flush path", () => {
       return mock as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath: sp,
     });
@@ -1398,7 +1418,7 @@ describe("async disk I/O in flush path", () => {
       return { on: vi.fn(), write: vi.fn(), end: vi.fn(), destroy: vi.fn() } as any;
     });
 
-    const client = new ApiDashClient({
+    const client = new PeekApiClient({
       ...VALID_OPTIONS,
       storagePath: sp,
     });

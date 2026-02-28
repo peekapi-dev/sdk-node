@@ -1,7 +1,7 @@
 {
-  "name": "@api-usage-dashboard/sdk-node",
+  "name": "@peekapi/sdk-node",
   "version": "0.1.0",
-  "description": "Node.js SDK for API Usage Dashboard — one-line API analytics",
+  "description": "Node.js SDK for PeekAPI — one-line API analytics",
   "license": "MIT",
   "files": [
     "dist"
@@ -9,7 +9,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc && node scripts/inject-endpoint.js",
+    "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run --exclude dist",
     "test:watch": "vitest"

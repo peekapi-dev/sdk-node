@@ -1,15 +1,15 @@
 import type { Request, Response, NextFunction } from "express";
-import { ApiDashClient } from "../client";
-import type { ApiDashOptions } from "../types";
-import { defaultIdentifyConsumer } from "./shared";
+import { PeekApiClient } from "../client";
+import type { PeekApiOptions } from "../types";
+import { defaultIdentifyConsumer, sortQueryString } from "./shared";
 
-export function expressMiddleware(options: ApiDashOptions) {
-  const client = new ApiDashClient(options);
+export function expressMiddleware(options: PeekApiOptions) {
+  const client = new PeekApiClient(options);
 
   // Flush on process exit (once to avoid listener leak)
   process.once("beforeExit", () => client.shutdown());
 
-  return function apiDashMiddleware(req: Request, res: Response, next: NextFunction): void {
+  return function peekapiMiddleware(req: Request, res: Response, next: NextFunction): void {
     const startTime = process.hrtime.bigint();
     const socketBytesAtStart = req.socket?.bytesRead ?? 0;
 
@@ -54,9 +54,14 @@ export function expressMiddleware(options: ApiDashOptions) {
           ? options.identifyConsumer(req)
           : defaultIdentifyConsumer(req.headers);
 
+        let path = req.route?.path ? (req.baseUrl ?? "") + req.route.path : req.path;
+        if (options.collectQueryString) {
+          path += sortQueryString(req.originalUrl);
+        }
+
         client.track({
           method: req.method,
-          path: req.route?.path ? (req.baseUrl ?? "") + req.route.path : req.path,
+          path,
           status_code: res.statusCode,
           response_time_ms: Math.round(duration * 100) / 100,
           request_size: requestSize,

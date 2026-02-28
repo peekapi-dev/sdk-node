@@ -4,12 +4,12 @@ import { createHash } from "crypto";
 import Hapi from "@hapi/hapi";
 import Boom from "@hapi/boom";
 import { hapiPlugin } from "../middleware/hapi";
-import type { ApiDashOptions } from "../types";
+import type { PeekApiOptions } from "../types";
 
 // Prevent MaxListenersExceededWarning from test client instances
 process.setMaxListeners(50);
 
-const VALID_OPTIONS: ApiDashOptions = {
+const VALID_OPTIONS: PeekApiOptions = {
   apiKey: "ak_test_key_123",
   endpoint: "https://example.supabase.co/functions/v1/ingest",
   flushInterval: 60_000,
@@ -29,7 +29,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function buildServer(optionOverrides: Partial<ApiDashOptions> = {}) {
+async function buildServer(optionOverrides: Partial<PeekApiOptions> = {}) {
   const server = Hapi.server({ port: 0 });
   await server.register({
     plugin: hapiPlugin,
@@ -190,6 +190,28 @@ describe("crash safety — plugin must never break customer API", () => {
     const res = await server.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.payload)).toEqual({ status: "ok" });
+    await server.stop();
+  });
+});
+
+// ─── collectQueryString ──────────────────────────────────────────────
+
+describe("collectQueryString option", () => {
+  it("does not throw when collectQueryString is true", async () => {
+    const server = await buildServer({ collectQueryString: true });
+    server.route({ method: "GET", path: "/search", handler: () => ({ results: [] }) });
+
+    const res = await server.inject({ method: "GET", url: "/search?z=3&a=1" });
+    expect(res.statusCode).toBe(200);
+    await server.stop();
+  });
+
+  it("handles request without query string when enabled", async () => {
+    const server = await buildServer({ collectQueryString: true });
+    server.route({ method: "GET", path: "/users", handler: () => [] });
+
+    const res = await server.inject({ method: "GET", url: "/users" });
+    expect(res.statusCode).toBe(200);
     await server.stop();
   });
 });

@@ -1,11 +1,11 @@
 import fp from "fastify-plugin";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { ApiDashClient } from "../client";
-import type { ApiDashOptions } from "../types";
-import { defaultIdentifyConsumer } from "./shared";
+import { PeekApiClient } from "../client";
+import type { PeekApiOptions } from "../types";
+import { defaultIdentifyConsumer, sortQueryString } from "./shared";
 
-function apiDashPlugin(fastify: FastifyInstance, options: ApiDashOptions, done: () => void) {
-  const client = new ApiDashClient(options);
+function peekapiPlugin(fastify: FastifyInstance, options: PeekApiOptions, done: () => void) {
+  const client = new PeekApiClient(options);
 
   // Flush remaining events when Fastify shuts down
   fastify.addHook("onClose", async () => client.shutdown());
@@ -19,9 +19,14 @@ function apiDashPlugin(fastify: FastifyInstance, options: ApiDashOptions, done: 
           ? options.identifyConsumer(request)
           : defaultIdentifyConsumer(request.headers);
 
+        let path = request.routeOptions?.url ?? request.url;
+        if (options.collectQueryString) {
+          path += sortQueryString(request.url);
+        }
+
         client.track({
           method: request.method,
-          path: request.routeOptions?.url ?? request.url,
+          path,
           status_code: reply.statusCode,
           response_time_ms: Math.round(reply.elapsedTime * 100) / 100,
           request_size: Number(request.headers["content-length"] ?? 0),
@@ -39,7 +44,7 @@ function apiDashPlugin(fastify: FastifyInstance, options: ApiDashOptions, done: 
   done();
 }
 
-export const fastifyMiddleware = fp(apiDashPlugin, {
-  name: "apidash",
+export const fastifyMiddleware = fp(peekapiPlugin, {
+  name: "peekapi",
   fastify: ">=4.0.0",
 });

@@ -1,6 +1,21 @@
 import { createHash } from "crypto";
 
 /**
+ * Extract and sort the query string from a URL.
+ * Returns "?a=1&b=2" or "" if no query string.
+ */
+export function sortQueryString(url: string): string {
+  const qIndex = url.indexOf("?");
+  if (qIndex === -1) return "";
+  const params = url
+    .slice(qIndex + 1)
+    .split("&")
+    .filter(Boolean)
+    .sort();
+  return params.length > 0 ? "?" + params.join("&") : "";
+}
+
+/**
  * Hash sensitive auth values to a short, stable, non-reversible identifier.
  * Uses SHA-256 truncated to 12 hex chars — enough for grouping, not reversible.
  */

@@ -4,12 +4,12 @@ import { createHash } from "crypto";
 import Koa from "koa";
 import request from "supertest";
 import { koaMiddleware } from "../middleware/koa";
-import type { ApiDashOptions } from "../types";
+import type { PeekApiOptions } from "../types";
 
 // Prevent MaxListenersExceededWarning from test client instances
 process.setMaxListeners(50);
 
-const VALID_OPTIONS: ApiDashOptions = {
+const VALID_OPTIONS: PeekApiOptions = {
   apiKey: "ak_test_key_123",
   endpoint: "https://example.supabase.co/functions/v1/ingest",
   flushInterval: 60_000,
@@ -29,7 +29,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function buildApp(optionOverrides: Partial<ApiDashOptions> = {}) {
+function buildApp(optionOverrides: Partial<PeekApiOptions> = {}) {
   const app = new Koa();
   app.use(koaMiddleware({ ...VALID_OPTIONS, ...optionOverrides }));
   return app;
@@ -130,5 +130,29 @@ describe("crash safety — middleware must never break customer API", () => {
     });
     const res = await request(app.callback()).post("/empty");
     expect(res.status).toBe(204);
+  });
+});
+
+// ─── collectQueryString ──────────────────────────────────────────────
+
+describe("collectQueryString option", () => {
+  it("does not throw when collectQueryString is true", async () => {
+    const app = buildApp({ collectQueryString: true });
+    app.use((ctx) => {
+      ctx.body = { results: [] };
+    });
+
+    const res = await request(app.callback()).get("/search?z=3&a=1");
+    expect(res.status).toBe(200);
+  });
+
+  it("handles request without query string when enabled", async () => {
+    const app = buildApp({ collectQueryString: true });
+    app.use((ctx) => {
+      ctx.body = [];
+    });
+
+    const res = await request(app.callback()).get("/users");
+    expect(res.status).toBe(200);
   });
 });

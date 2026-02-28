@@ -1,7 +1,7 @@
 import { tap } from "rxjs";
-import { ApiDashClient } from "../client";
-import type { ApiDashOptions } from "../types";
-import { defaultIdentifyConsumer } from "./shared";
+import { PeekApiClient } from "../client";
+import type { PeekApiOptions } from "../types";
+import { defaultIdentifyConsumer, sortQueryString } from "./shared";
 
 /**
  * NestJS interceptor interfaces — inlined to avoid requiring @nestjs/common
@@ -15,16 +15,16 @@ interface CallHandler {
   handle(): import("rxjs").Observable<any>;
 }
 
-let sharedClient: ApiDashClient | undefined;
+let sharedClient: PeekApiClient | undefined;
 
-export class ApiDashInterceptor {
-  private client: ApiDashClient;
-  private options: ApiDashOptions;
+export class PeekApiInterceptor {
+  private client: PeekApiClient;
+  private options: PeekApiOptions;
 
-  constructor(options: ApiDashOptions) {
+  constructor(options: PeekApiOptions) {
     // Reuse a single client instance across interceptor instances
     if (!sharedClient) {
-      sharedClient = new ApiDashClient(options);
+      sharedClient = new PeekApiClient(options);
       process.once("beforeExit", () => sharedClient?.shutdown());
     }
     this.client = sharedClient;
@@ -46,9 +46,14 @@ export class ApiDashInterceptor {
             ? this.options.identifyConsumer(request)
             : defaultIdentifyConsumer(request.headers ?? {});
 
+          let path = request.route?.path ?? request.url;
+          if (this.options.collectQueryString) {
+            path += sortQueryString(request.originalUrl ?? request.url);
+          }
+
           this.client.track({
             method: request.method,
-            path: request.route?.path ?? request.url,
+            path,
             status_code: response.statusCode,
             response_time_ms: Math.round(duration * 100) / 100,
             request_size: Number(request.headers?.["content-length"] ?? 0),

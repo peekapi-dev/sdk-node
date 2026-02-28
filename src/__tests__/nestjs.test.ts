@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import https from "https";
 import { of } from "rxjs";
-import { ApiDashInterceptor } from "../middleware/nestjs";
-import type { ApiDashOptions } from "../types";
+import { PeekApiInterceptor } from "../middleware/nestjs";
+import type { PeekApiOptions } from "../types";
 
 // Prevent MaxListenersExceededWarning from test client instances
 process.setMaxListeners(50);
 
-const VALID_OPTIONS: ApiDashOptions = {
+const VALID_OPTIONS: PeekApiOptions = {
   apiKey: "ak_test_key_123",
   endpoint: "https://example.supabase.co/functions/v1/ingest",
   flushInterval: 60_000,
@@ -66,14 +66,14 @@ function mockCallHandler(result: any = { ok: true }) {
 
 // ─── Interceptor Wiring ────────────────────────────────────────────
 
-describe("ApiDashInterceptor", () => {
+describe("PeekApiInterceptor", () => {
   it("creates without errors", () => {
-    const interceptor = new ApiDashInterceptor(VALID_OPTIONS);
+    const interceptor = new PeekApiInterceptor(VALID_OPTIONS);
     expect(interceptor).toBeDefined();
   });
 
   it("returns an observable from intercept()", () => {
-    const interceptor = new ApiDashInterceptor(VALID_OPTIONS);
+    const interceptor = new PeekApiInterceptor(VALID_OPTIONS);
     const { context } = mockContext();
     const handler = mockCallHandler();
 
@@ -83,7 +83,7 @@ describe("ApiDashInterceptor", () => {
   });
 
   it("passes through the handler result", async () => {
-    const interceptor = new ApiDashInterceptor(VALID_OPTIONS);
+    const interceptor = new PeekApiInterceptor(VALID_OPTIONS);
     const { context } = mockContext();
     const handler = mockCallHandler({ items: [1, 2, 3] });
 
@@ -101,7 +101,7 @@ describe("ApiDashInterceptor", () => {
 
 describe("consumer identification", () => {
   it("uses x-api-key header as consumer_id", async () => {
-    const interceptor = new ApiDashInterceptor(VALID_OPTIONS);
+    const interceptor = new PeekApiInterceptor(VALID_OPTIONS);
     const { context } = mockContext({ headers: { "x-api-key": "key_consumer_123" } });
     const handler = mockCallHandler();
 
@@ -116,7 +116,7 @@ describe("consumer identification", () => {
 
   it("uses custom identifyConsumer callback", async () => {
     const identifySpy = vi.fn().mockReturnValue("tenant-42");
-    const interceptor = new ApiDashInterceptor({
+    const interceptor = new PeekApiInterceptor({
       ...VALID_OPTIONS,
       identifyConsumer: identifySpy,
     });
@@ -137,7 +137,7 @@ describe("consumer identification", () => {
 
 describe("crash safety — interceptor must never break customer API", () => {
   it("still passes through result when identifyConsumer throws", async () => {
-    const interceptor = new ApiDashInterceptor({
+    const interceptor = new PeekApiInterceptor({
       ...VALID_OPTIONS,
       identifyConsumer: () => {
         throw new Error("consumer callback exploded");
@@ -156,7 +156,7 @@ describe("crash safety — interceptor must never break customer API", () => {
   });
 
   it("handles missing request properties gracefully", async () => {
-    const interceptor = new ApiDashInterceptor(VALID_OPTIONS);
+    const interceptor = new PeekApiInterceptor(VALID_OPTIONS);
     const context = {
       switchToHttp: () => ({
         getRequest: () => ({
@@ -179,5 +179,37 @@ describe("crash safety — interceptor must never break customer API", () => {
     });
 
     expect(result).toEqual({ ok: true });
+  });
+});
+
+// ─── collectQueryString ──────────────────────────────────────────────
+
+describe("collectQueryString option", () => {
+  it("does not throw when collectQueryString is true", async () => {
+    const interceptor = new PeekApiInterceptor({ ...VALID_OPTIONS, collectQueryString: true });
+    const { context } = mockContext({ url: "/search?z=3&a=1" });
+    const handler = mockCallHandler({ results: [] });
+
+    const result = await new Promise((resolve) => {
+      interceptor.intercept(context, handler).subscribe({
+        next: (value: any) => resolve(value),
+      });
+    });
+
+    expect(result).toEqual({ results: [] });
+  });
+
+  it("handles request without query string when enabled", async () => {
+    const interceptor = new PeekApiInterceptor({ ...VALID_OPTIONS, collectQueryString: true });
+    const { context } = mockContext({ url: "/users" });
+    const handler = mockCallHandler([]);
+
+    const result = await new Promise((resolve) => {
+      interceptor.intercept(context, handler).subscribe({
+        next: (value: any) => resolve(value),
+      });
+    });
+
+    expect(result).toEqual([]);
   });
 });

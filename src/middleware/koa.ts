@@ -1,14 +1,14 @@
 import type { Context, Next, Middleware } from "koa";
-import { ApiDashClient } from "../client";
-import type { ApiDashOptions } from "../types";
-import { defaultIdentifyConsumer } from "./shared";
+import { PeekApiClient } from "../client";
+import type { PeekApiOptions } from "../types";
+import { defaultIdentifyConsumer, sortQueryString } from "./shared";
 
-export function koaMiddleware(options: ApiDashOptions): Middleware {
-  const client = new ApiDashClient(options);
+export function koaMiddleware(options: PeekApiOptions): Middleware {
+  const client = new PeekApiClient(options);
 
   process.once("beforeExit", () => client.shutdown());
 
-  return async function apiDashMiddleware(ctx: Context, next: Next): Promise<void> {
+  return async function peekapiMiddleware(ctx: Context, next: Next): Promise<void> {
     const start = process.hrtime.bigint();
 
     await next();
@@ -20,9 +20,14 @@ export function koaMiddleware(options: ApiDashOptions): Middleware {
         ? options.identifyConsumer(ctx.req)
         : defaultIdentifyConsumer(ctx.headers);
 
+      let path = ctx.routePath ?? ctx.path;
+      if (options.collectQueryString) {
+        path += sortQueryString(ctx.originalUrl ?? ctx.url);
+      }
+
       client.track({
         method: ctx.method,
-        path: ctx.routePath ?? ctx.path,
+        path,
         status_code: ctx.status,
         response_time_ms: Math.round(duration * 100) / 100,
         request_size: ctx.request.length ?? 0,

@@ -1,13 +1,13 @@
 import type { Plugin, Request, ResponseToolkit, Server } from "@hapi/hapi";
-import { ApiDashClient } from "../client";
-import type { ApiDashOptions } from "../types";
+import { PeekApiClient } from "../client";
+import type { PeekApiOptions } from "../types";
 import { defaultIdentifyConsumer } from "./shared";
 
-export const hapiPlugin: Plugin<ApiDashOptions> = {
-  name: "apidash",
+export const hapiPlugin: Plugin<PeekApiOptions> = {
+  name: "peekapi",
   version: "1.0.0",
-  register(server: Server, options: ApiDashOptions) {
-    const client = new ApiDashClient(options);
+  register(server: Server, options: PeekApiOptions) {
+    const client = new PeekApiClient(options);
 
     // Flush remaining events when the server stops
     server.ext("onPreStop", async () => client.shutdown());
@@ -27,9 +27,18 @@ export const hapiPlugin: Plugin<ApiDashOptions> = {
             ? response.output.statusCode
             : ((response as any)?.statusCode ?? 0);
 
+        let path = request.route.path;
+        if (options.collectQueryString) {
+          const search = request.url?.search ?? "";
+          if (search) {
+            const params = search.slice(1).split("&").filter(Boolean).sort();
+            if (params.length > 0) path += "?" + params.join("&");
+          }
+        }
+
         client.track({
           method: request.method.toUpperCase(),
-          path: request.route.path,
+          path,
           status_code: statusCode,
           response_time_ms: Math.round(duration * 100) / 100,
           request_size: Number(request.headers["content-length"] ?? 0),

@@ -3,12 +3,12 @@ import https from "https";
 import { createHash } from "crypto";
 import Fastify from "fastify";
 import { fastifyMiddleware } from "../middleware/fastify";
-import type { ApiDashOptions } from "../types";
+import type { PeekApiOptions } from "../types";
 
 // Prevent MaxListenersExceededWarning from test client instances
 process.setMaxListeners(50);
 
-const VALID_OPTIONS: ApiDashOptions = {
+const VALID_OPTIONS: PeekApiOptions = {
   apiKey: "ak_test_key_123",
   endpoint: "https://example.supabase.co/functions/v1/ingest",
   flushInterval: 60_000,
@@ -29,7 +29,7 @@ afterEach(() => {
 });
 
 // Helper: build a Fastify instance with the plugin registered
-async function buildApp(optionOverrides: Partial<ApiDashOptions> = {}) {
+async function buildApp(optionOverrides: Partial<PeekApiOptions> = {}) {
   const app = Fastify();
   await app.register(fastifyMiddleware, { ...VALID_OPTIONS, ...optionOverrides });
   return app;
@@ -241,6 +241,37 @@ describe("crash safety — plugin must never break customer API", () => {
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ status: "ok" });
+    await app.close();
+  });
+});
+
+// ─── collectQueryString ──────────────────────────────────────────────
+
+describe("collectQueryString option", () => {
+  it("does not include query string by default", async () => {
+    const app = await buildApp();
+    app.get("/search", (_req, reply) => reply.send({ results: [] }));
+
+    const res = await app.inject({ method: "GET", url: "/search?q=foo&page=1" });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("does not throw when collectQueryString is true", async () => {
+    const app = await buildApp({ collectQueryString: true });
+    app.get("/search", (_req, reply) => reply.send({ results: [] }));
+
+    const res = await app.inject({ method: "GET", url: "/search?z=3&a=1" });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("handles request without query string when collectQueryString is true", async () => {
+    const app = await buildApp({ collectQueryString: true });
+    app.get("/users", (_req, reply) => reply.send([]));
+
+    const res = await app.inject({ method: "GET", url: "/users" });
+    expect(res.statusCode).toBe(200);
     await app.close();
   });
 });
