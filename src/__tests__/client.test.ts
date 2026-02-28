@@ -91,7 +91,7 @@ afterEach(() => {
 describe("constructor validation", () => {
   it("uses default endpoint when not provided", () => {
     const client = new PeekApiClient({ apiKey: "ak_test" });
-    expect((client as any).parsedUrl.hostname).toContain("supabase.co");
+    expect((client as any).parsedUrl.hostname).toContain("ingest.peekapi.dev");
     client.shutdown();
   });
 
