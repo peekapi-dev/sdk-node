@@ -2,6 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/@peekapi/sdk-node)](https://www.npmjs.com/package/@peekapi/sdk-node)
 [![license](https://img.shields.io/npm/l/@peekapi/sdk-node)](./LICENSE)
+[![CI](https://github.com/peekapi-dev/sdk-node/actions/workflows/ci.yml/badge.svg)](https://github.com/peekapi-dev/sdk-node/actions/workflows/ci.yml)
 
 Zero-dependency Node.js SDK for [PeekAPI](https://peekapi.dev). Add API analytics to any Node.js framework with one line of middleware.
 
@@ -161,6 +162,13 @@ app.use(peekapi({
 ## Requirements
 
 - Node.js >= 18
+
+## Contributing
+
+1. Fork & clone the repo
+2. Install dependencies — `npm install`
+3. Run tests — `npm test`
+4. Submit a PR
 
 ## License
 
