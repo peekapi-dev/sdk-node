@@ -3,11 +3,39 @@
   "version": "0.1.0",
   "description": "Node.js SDK for PeekAPI — one-line API analytics",
   "license": "MIT",
+  "author": "PeekAPI <support@peekapi.dev> (https://peekapi.dev)",
+  "homepage": "https://github.com/peekapi-dev/sdk-node#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peekapi-dev/sdk-node.git"
+  },
+  "bugs": {
+    "url": "https://github.com/peekapi-dev/sdk-node/issues"
+  },
+  "keywords": [
+    "api",
+    "analytics",
+    "monitoring",
+    "express",
+    "fastify",
+    "koa",
+    "hapi",
+    "nestjs",
+    "middleware",
+    "observability",
+    "peekapi"
+  ],
   "files": [
     "dist"
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
