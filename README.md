@@ -165,6 +165,8 @@ app.use(peekapi({
 
 ## Contributing
 
+Bug reports and feature requests: [peekapi-dev/community](https://github.com/peekapi-dev/community/issues)
+
 1. Fork & clone the repo
 2. Install dependencies — `npm install`
 3. Run tests — `npm test`
